@@ -1,0 +1,243 @@
+---
+title: "Selecting the best Model of Predicting Full Transcripts"
+author: "Chunyen"
+date: "2024/3/13"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+header-includes:
+- \usepackage{fontspec}
+- \setmainfont{Noto Sans CJK TC}
+---
+
+# Introduction
+
+此處僅有使用求助者對話語句的資料建立的模型。
+
+選擇不同風險等級切分中的最佳模型。
+
+當 risk5 時，BERT 的最佳模型表現較 RF 模型佳，
+
+使用的參照分別為 `max_sim_ref2` 與 `max_sim_ref3`。
+
+當 risk4 時，RF 的最佳模型反而表現較 BERT 模型佳，
+
+使用的參照分別為 `avg_sim_ref3` 與 `avg_sim_ref2`。
+
+當 risk3 時，BERT 的最佳模型表現較 RF 模型佳，
+
+使用的參照分別為 `max_sim_ref1` 與 `max_sim_ref3`。
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r include=FALSE}
+# import libraries
+library(tidyverse)
+
+```
+
+```{r}
+# set working directory
+setwd("/home/quantlab/2024_ChunyenThesis/Bert")
+```
+
+```{r include=FALSE}
+# Fix the Mandarin font issue
+library(showtext)
+
+# 添加字體
+# font_add("Noto Sans CJK TC", "/usr/share/fonts/opentype/noto/NotoSansCJK-Light.ttc")
+font_add("Noto Sans CJK TC", "/notebooks/exploratory/NotoSansCJK-Light.ttc")
+
+# 啟用 showtext_auto() 自動渲染文字
+showtext_auto()
+
+```
+
+```{r}
+# Functions
+
+# 定義一個函數來讀取和合併檔案
+Merge_full_dialogue <- function(directory_path) {
+  # 獲取目錄下所有 .csv 檔案的路徑
+  file_paths <- list.files(directory_path, pattern = "\\.csv$", full.names = TRUE)
+  
+  all_data <- lapply(file_paths, function(file_path) {
+    data <- read_csv(file_path)
+    # 新增一個欄位來儲存原檔案名稱
+    data$file_name <- basename(file_path)
+    return(data)
+  })
+  # 將所有檔案的資料行合併
+  merged_data <- bind_rows(all_data)
+  return(merged_data)
+}
+
+Select_best_model <- function(data, risklevel, metric) {
+  data %>% 
+    select(-file_name) %>%
+    filter(Risk_level == risklevel) %>%
+    arrange(desc(metric)) %>%
+    head(1) %>% 
+    return()
+}
+
+Arrange_by_metric <- function(data, risklevel, metric) {
+  print(colnames(data))
+  data %>%
+      # 不要選取 file_name
+    select(-file_name) %>%
+    filter(`Risk_level` == risklevel) %>%
+    arrange(desc(!!sym(metric))) %>%
+    mutate_if(is.numeric, round, 3) %>%
+    return()
+}
+
+```
+
+
+```{r}
+# Set folder path
+processed_path <- "data/processed/"
+rfReports_path <- "results/rf_full_dialogue"
+bertReports_path <- "results/bert_full_dialogue"
+```
+
+```{r include=FALSE}
+# 呼叫函數並輸出合併後的資料框
+# rf_fullDialogue_df <- Merge_full_dialogue(rfReports_path)
+# rf_fullDialogue_df %>% write_csv(rfReports_path %>% paste0(., "rf_fullDialogue.csv"))
+# bert_fullDialogue_df <- Merge_full_dialogue(bertReports_path)
+# bert_fullDialogue_df %>% write_csv(bertReports_path %>% paste0(., "bert_fullDialogue.csv"))
+```
+
+```{r}
+RISK_LEVEL_COL_VEC = c("risk3", "risk4", "risk5")
+METRICS_VEC <- c("Accuracy", "Precision", "Recall", "F1",
+                 "Graded precision", "Graded recall", "Graded F1")
+```
+
+```{r include=FALSE}
+rf_fullDialogue_df <- read_csv("notebooks/exploratory/rf_full_dialoguerf_fullDialogue.csv")
+bert_fullDialogue_df <- read_csv("notebooks/exploratory/bert_full_dialoguebert_fullDialogue.csv")
+```
+
+```{r}
+# Fix the FScore column
+rf_fullDialogue_df <- rf_fullDialogue_df %>% 
+  mutate(FScore = 2*Graded_precision*Graded_recall / (Graded_precision + Graded_recall))
+
+bert_fullDialogue_df <- bert_fullDialogue_df %>% 
+  mutate(FScore = 2*Graded_precision*Graded_recall / (Graded_precision + Graded_recall))
+
+```
+
+
+# 依照 accuracy 排序
+
+## risk5
+
+隨機森林
+
+```{r}
+risk_level <- "risk5"
+metric <- "Accuracy"
+
+rf_fullDialogue_df %>%
+  select(-Best_parameters) %>%
+  Arrange_by_metric(., risk_level, metric) %>%
+  knitr::kable()
+```
+
+BERT
+
+```{r}
+bert_fullDialogue_df %>% 
+  Arrange_by_metric(., risk_level, metric) %>%
+  knitr::kable()
+
+```
+
+## risk4
+
+隨機森林
+
+```{r}
+risk_level <- "risk4"
+metric <- "Accuracy"
+
+rf_fullDialogue_df %>%
+  select(-Best_parameters) %>% 
+  Arrange_by_metric(., risk_level, metric) %>%
+  knitr::kable()
+
+```
+
+BERT
+
+```{r}
+bert_fullDialogue_df %>% 
+  Arrange_by_metric(., risk_level, metric) %>%
+  knitr::kable()
+```
+
+## risk3
+
+隨機森林
+
+```{r}
+
+risk_level <- "risk3"
+metric <- "Accuracy"
+
+rf_fullDialogue_df %>%
+  select(-Best_parameters) %>% 
+  Arrange_by_metric(., risk_level, metric) %>%
+  knitr::kable()
+```
+
+BERT
+
+```{r}
+
+bert_fullDialogue_df %>% 
+  Arrange_by_metric(., risk_level, metric) %>%
+  knitr::kable()
+```
+
+
+# Select the best model by each risk level and metric
+
+```{r}
+# Concatenate all conditions between risk levels and metrics
+comb_df <- expand.grid(Risk_Level = RISK_LEVEL_COL_VEC, Metric = METRICS_VEC)
+
+# Select the best model by each risk level and metric
+best_rf_model_tib <- comb_df %>% 
+  rowwise() %>% 
+  mutate(Best_model = rf_fullDialogue_df %>% Select_best_model(., Risk_Level, Metric))
+
+best_rf_model_tib$Best_model %>% 
+  select(-Best_parameters) %>%
+  knitr::kable()
+
+```
+
+```{r}
+best_bert_model <- comb_df %>% 
+  rowwise() %>% 
+  mutate(Best_model = bert_fullDialogue_df %>% Select_best_model(., Risk_Level, Metric))
+
+best_bert_model$Best_model %>% 
+  knitr::kable()
+
+```
+
+
+

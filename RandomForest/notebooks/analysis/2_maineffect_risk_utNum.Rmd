@@ -1,0 +1,675 @@
+---
+title: "Main Effect between Risk and Utterance Number"
+author: "Chunyen"
+date: "2024/3/13"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+editor_options: 
+  chunk_output_type: console
+header-includes:
+  - \usepackage{fontspec}
+  - \setmainfont{Noto Sans CJK TC}
+---
+
+# Introduction
+
+觀察自殺風險等級，與求助者/接線員逐字稿語句長度的關係
+
+使用直方圖、變異數分析、迴歸分析，發現語句長度越長，自殺風險等級可能越高。
+
+且求助者與接線員的語句長度差，也可能與自殺風險等級有關。
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r include=FALSE}
+# import libraries
+library(tidyverse)
+
+```
+
+```{r}
+# set working directory
+setwd("/home/quantlab/2024_ChunyenThesis/Bert")
+```
+
+```{r include=FALSE}
+# Fix the Mandarin font issue
+library(showtext)
+
+# 添加字體
+# font_add("Noto Sans CJK TC", "/usr/share/fonts/opentype/noto/NotoSansCJK-Light.ttc")
+font_add("Noto Sans CJK TC", "/notebooks/exploratory/NotoSansCJK-Light.ttc")
+
+# 啟用 showtext_auto() 自動渲染文字
+showtext_auto()
+
+```
+
+```{r}
+# Set folder path
+processed_path <- "data/processed/"
+```
+
+```{r include=FALSE}
+# read data
+risklevel_tib <- read_csv(paste0(processed_path, "risklevel.csv"))
+transcript_caller_tib <- read_csv(paste0(processed_path, "transcripts_emb_caller.csv"))
+transcript_responser_tib <- read_csv(paste0(processed_path, "transcripts_emb_responser.csv"))
+
+# Count utterances by each dialogue_id
+utNum_caller_tib <- transcript_caller_tib %>% 
+  group_by(dialogue_id) %>%
+  summarise(utNum_caller = n())
+utNum_responser_tib <- transcript_responser_tib %>% 
+  group_by(dialogue_id) %>%
+  summarise(utNum_responser = n())
+
+# join by dialogue_id
+utNum_tib <- utNum_caller_tib %>% 
+  left_join(., utNum_responser_tib, by = "dialogue_id")
+data_tib <- risklevel_tib %>% 
+  left_join(., utNum_tib, by = "dialogue_id")
+```
+
+# Data
+
+準備後續分析的資料結構如下
+
+```{r}
+data_tib %>% str()
+```
+
+# 求助者x語句長度
+
+依照語句長度分成短、中、長三組
+
+```{r}
+# find the cut off
+data_tib %>% 
+  summarise(
+    cut_off1 = quantile(utNum_caller, 1/3),
+    cut_off2 = quantile(utNum_caller, 2/3)
+  ) %>% 
+  round(2) %>% 
+  knitr::kable()
+```
+
+取 150、300 作為分組的切節分數
+
+各組數量
+
+```{r}
+cut_off1 <- 150
+cut_off2 <- 300
+
+data_tib <- data_tib %>% 
+  mutate(utNum_caller_group = case_when(
+    utNum_caller <= cut_off1 ~ "short",
+    utNum_caller > cut_off1 & utNum_caller <= cut_off2 ~ "medium",
+    utNum_caller > cut_off2 ~ "long"
+  ))
+
+# count
+data_tib %>% 
+  count(utNum_caller_group) %>% 
+  knitr::kable()
+```
+
+# 接線員x語句長度
+
+依照語句長度分成短、中、長三組
+
+```{r}
+# find the cut off
+data_tib %>% 
+  summarise(
+    cut_off1 = quantile(utNum_responser, 1/3),
+    cut_off2 = quantile(utNum_responser, 2/3)
+  ) %>% 
+  round(2) %>% 
+  knitr::kable()
+
+```
+
+取 175、350 作為分組的切節分數
+
+各組數量
+
+```{r}
+cut_off1 <- 175
+cut_off2 <- 350
+
+data_tib <- data_tib %>% 
+  mutate(utNum_responser_group = case_when(
+    utNum_responser <= cut_off1 ~ "short",
+    utNum_responser > cut_off1 & utNum_responser <= cut_off2 ~ "medium",
+    utNum_responser > cut_off2 ~ "long"
+  ))
+
+# count
+data_tib %>% 
+  count(utNum_responser_group) %>% 
+  knitr::kable()
+
+```
+
+```{r}
+# save data
+data_tib %>% write_csv(paste0("notebooks/exploratory/", "data.csv"))
+```
+
+# 求助者的語句長度x自殺風險等級5級
+
+## 圖
+
+```{r}
+# plot
+data_tib %>% 
+  count(utNum_caller_group, risk5) %>% 
+  ggplot(aes(
+    x = utNum_caller_group, 
+    y = n, 
+    fill = risk5 %>% as.factor()
+    )) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "求助者的語句長度x自殺風險等級5級", 
+    x = "對話長度", 
+    y = "逐字稿數量") +
+  theme_minimal() +
+  theme(text = element_text(family = "Noto Sans CJK TC")) +
+  # 將 risk_level 的顏色順序顛倒
+  scale_fill_brewer(palette = "Greys") + 
+  # 將 x 的 level 左右順序顛倒
+  scale_x_discrete(limits = c("short", "medium", "long")) +
+  # 加上數值
+  geom_text(
+    aes(label = n), 
+    position = position_dodge(width = 0.9), 
+    vjust = -0.5, # Adjust this value as needed for your specific plot
+    size = 3
+  ) +
+  # 修改 legend 的標題
+  labs(fill = "自殺風險等級")
+```
+
+## 統計檢定
+
+ANOVA: utNum_caller ~ risk5
+
+```{r}
+# anova check main effect
+data_tib %>% 
+  mutate(risk5 = risk5 %>% as.factor()) %>%
+  aov(utNum_caller ~ risk5, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+Regression: risk5 ~ utNum_caller
+
+```{r}
+# regression
+data_tib %>% 
+  aov(risk5 ~ utNum_caller, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+
+```
+
+
+# 求助者的語句長度x自殺風險等級4級
+
+## 圖
+
+```{r}
+# plot
+data_tib %>% 
+  count(utNum_caller_group, risk4) %>% 
+  ggplot(aes(
+    x = utNum_caller_group, 
+    y = n, 
+    fill = risk4 %>% as.factor()
+    )) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "求助者的語句長度x自殺風險等級4級", 
+    x = "對話長度", 
+    y = "逐字稿數量") +
+  theme_minimal() +
+  theme(text = element_text(family = "Noto Sans CJK TC")) +
+  # 將 risk_level 的顏色順序顛倒
+  scale_fill_brewer(palette = "Greys") + 
+  # 將 x 的 level 左右順序顛倒
+  scale_x_discrete(limits = c("short", "medium", "long")) +
+  # 加上數值
+  geom_text(
+    aes(label = n), 
+    position = position_dodge(width = 0.9), 
+    vjust = -0.5, # Adjust this value as needed for your specific plot
+    size = 3
+  ) +
+  # 修改 legend 的標題
+  labs(fill = "自殺風險等級")
+```
+
+## 統計檢定
+
+ANOVA: utNum_caller ~ risk4
+
+```{r}
+# anova check main effect
+data_tib %>% 
+  mutate(risk4 = risk4 %>% as.factor()) %>%
+  aov(utNum_caller ~ risk4, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+
+```
+
+Regression: risk4 ~ utNum_caller
+
+```{r}
+# regression
+data_tib %>% 
+  aov(risk4 ~ utNum_caller, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+
+# 求助者的語句長度x自殺風險等級3級
+
+## 圖
+
+```{r}
+# plot
+data_tib %>% 
+  count(utNum_caller_group, risk3) %>% 
+  ggplot(aes(
+    x = utNum_caller_group, 
+    y = n, 
+    fill = risk3 %>% as.factor()
+    )) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "求助者的語句長度x自殺風險等級3級", 
+    x = "對話長度", 
+    y = "逐字稿數量") +
+  theme_minimal() +
+  theme(text = element_text(family = "Noto Sans CJK TC")) +
+  # 將 risk_level 的顏色順序顛倒
+  scale_fill_brewer(palette = "Greys") + 
+  # 將 x 的 level 左右順序顛倒
+  scale_x_discrete(limits = c("short", "medium", "long")) +
+  # 加上數值
+  geom_text(
+    aes(label = n), 
+    position = position_dodge(width = 0.9), 
+    vjust = -0.5, # Adjust this value as needed for your specific plot
+    size = 3
+  ) +
+  # 修改 legend 的標題
+  labs(fill = "自殺風險等級")
+
+```
+
+## 統計檢定
+
+ANOVA: utNum_caller ~ risk3
+
+```{r}
+# anova check main effect
+data_tib %>% 
+  mutate(risk3 = risk3 %>% as.factor()) %>%
+  aov(utNum_caller ~ risk3, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+Regression: risk3 ~ utNum_caller
+
+```{r}
+# regression
+data_tib %>% 
+  aov(risk3 ~ utNum_caller, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+-------------------
+
+# 接線員的語句長度x自殺風險等級5級
+
+## 圖
+
+```{r}
+# plot
+data_tib %>% 
+  count(utNum_responser_group, risk5) %>% 
+  ggplot(aes(
+    x = utNum_responser_group, 
+    y = n, 
+    fill = risk5 %>% as.factor()
+    )) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "接線員的語句長度x自殺風險等級5級", 
+    x = "對話長度", 
+    y = "逐字稿數量") +
+  theme_minimal() +
+  theme(text = element_text(family = "Noto Sans CJK TC")) +
+  # 將 risk_level 的顏色順序顛倒
+  scale_fill_brewer(palette = "Greys") + 
+  # 將 x 的 level 左右順序顛倒
+  scale_x_discrete(limits = c("short", "medium", "long")) +
+  # 加上數值
+  geom_text(
+    aes(label = n), 
+    position = position_dodge(width = 0.9), 
+    vjust = -0.5, # Adjust this value as needed for your specific plot
+    size = 3
+  ) +
+  # 修改 legend 的標題
+  labs(fill = "自殺風險等級")
+
+```
+
+## 統計檢定
+
+ANOVA: utNum_responser ~ risk5
+
+```{r}
+# anova check main effect
+data_tib %>% 
+  mutate(risk5 = risk5 %>% as.factor()) %>%
+  aov(utNum_responser ~ risk5, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+Regression: risk5 ~ utNum_responser
+
+```{r}
+# regression
+data_tib %>% 
+  aov(risk5 ~ utNum_responser, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+# 接線員的語句長度x自殺風險等級4級
+
+## 圖
+
+```{r}
+# plot
+data_tib %>% 
+  count(utNum_responser_group, risk4) %>% 
+  ggplot(aes(
+    x = utNum_responser_group, 
+    y = n, 
+    fill = risk4 %>% as.factor()
+    )) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "接線員的語句長度x自殺風險等級4級", 
+    x = "對話長度", 
+    y = "逐字稿數量") +
+  theme_minimal() +
+  theme(text = element_text(family = "Noto Sans CJK TC")) +
+  # 將 risk_level 的顏色順序顛倒
+  scale_fill_brewer(palette = "Greys") + 
+  # 將 x 的 level 左右順序顛倒
+  scale_x_discrete(limits = c("short", "medium", "long")) +
+  # 加上數值
+  geom_text(
+    aes(label = n), 
+    position = position_dodge(width = 0.9), 
+    vjust = -0.5, # Adjust this value as needed for your specific plot
+    size = 3
+  ) +
+  # 修改 legend 的標題
+  labs(fill = "自殺風險等級")
+```
+
+## 統計檢定
+
+ANOVA: utNum_responser ~ risk4
+
+```{r}
+# anova check main effect
+data_tib %>% 
+  mutate(risk4 = risk4 %>% as.factor()) %>%
+  aov(utNum_responser ~ risk4, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+Regression: risk4 ~ utNum_responser
+
+```{r}
+# regression
+data_tib %>% 
+  aov(risk4 ~ utNum_responser, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+# 接線員的語句長度x自殺風險等級3級
+
+## 圖
+
+```{r}
+# plot
+data_tib %>% 
+  count(utNum_responser_group, risk3) %>% 
+  ggplot(aes(
+    x = utNum_responser_group, 
+    y = n, 
+    fill = risk3 %>% as.factor()
+    )) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "接線員的語句長度x自殺風險等級3級", 
+    x = "對話長度", 
+    y = "逐字稿數量") +
+  theme_minimal() +
+  theme(text = element_text(family = "Noto Sans CJK TC")) +
+  # 將 risk_level 的顏色順序顛倒
+  scale_fill_brewer(palette = "Greys") + 
+  # 將 x 的 level 左右順序顛倒
+  scale_x_discrete(limits = c("short", "medium", "long")) +
+  # 加上數值
+  geom_text(
+    aes(label = n), 
+    position = position_dodge(width = 0.9), 
+    vjust = -0.5, # Adjust this value as needed for your specific plot
+    size = 3
+  ) +
+  # 修改 legend 的標題
+  labs(fill = "自殺風險等級")
+```
+
+## 統計檢定
+
+ANOVA: utNum_responser ~ risk3
+
+```{r}
+# anova check main effect
+data_tib %>% 
+  mutate(risk3 = risk3 %>% as.factor()) %>%
+  aov(utNum_responser ~ risk3, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+Regression: risk3 ~ utNum_responser
+
+```{r}
+# regression
+data_tib %>% 
+  aov(risk3 ~ utNum_responser, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+
+```
+
+
+# 求助者的語句長度x接線員的語句長度
+
+## 圖
+
+以下繪製的為求助者與接線員被分在不同語句長度組別中，兩者的語句長度差的分佈，共有 107 篇。
+
+
+```{r}
+data_tib <- 
+  data_tib %>% 
+  # 求助者和接線員的語句長度差取絕對值
+  mutate(utNum_diff = abs(utNum_caller - utNum_responser),
+         dialogue_id = dialogue_id %>% as.character())
+
+filteredData_tib <- data_tib %>% 
+  # 求助者和接線員沒有分在同一長度組別
+  filter(utNum_caller_group != utNum_responser_group) %>%
+  # 求助者和接線員的語句長度差取絕對值
+  mutate(
+    utNum_diff = abs(utNum_caller - utNum_responser),
+    dialogue_id = dialogue_id %>% as.character()
+    )
+
+# distribution
+filteredData_tib %>%
+  select(dialogue_id, utNum_diff) %>%
+  arrange(desc(utNum_diff)) %>%
+  ggplot(aes(x = utNum_diff)) +
+  geom_histogram(binwidth = 10) +
+  labs(
+    title = "求助者與接線員的語句長度差 (絕對值)", 
+    x = "語句長度差", 
+    y = "對話數量") +
+  theme_minimal() +
+  theme(text = element_text(family = "Noto Sans CJK TC"))
+
+# 差不取絕對值
+filteredData_tib %>% 
+  # 求助者和接線員的語句長度差取絕對值
+  mutate(utNum_diff = (utNum_caller - utNum_responser),
+         dialogue_id = dialogue_id %>% as.character()) %>%
+  ggplot(aes(x = utNum_diff)) +
+  geom_histogram(binwidth = 10) +
+  labs(
+    title = "求助者與接線員的語句長度差 (求助者-接線員)", 
+    x = "語句長度差", 
+    y = "對話數量") +
+  theme_minimal() +
+  theme(text = element_text(family = "Noto Sans CJK TC")) 
+
+```
+
+# 語句差x自殺風險等級
+
+## 統計檢定
+
+ANOVA: utNum_diff ~ risk5
+
+```{r}
+# anova
+data_tib %>% 
+  mutate(risk5 = risk5 %>% as.factor()) %>%
+  aov(utNum_diff ~ risk5, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+ANOVA: utNum_diff ~ risk4
+
+```{r}
+# anova
+data_tib %>% 
+  mutate(risk4 = risk4 %>% as.factor()) %>%
+  aov(utNum_diff ~ risk4, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+ANOVA: utNum_diff ~ risk3
+
+```{r}
+# anova
+data_tib %>% 
+  mutate(risk3 = risk3 %>% as.factor()) %>%
+  aov(utNum_diff ~ risk3, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+Regression: risk5 ~ utNum_diff
+
+```{r}
+# regression
+data_tib %>% 
+  aov(risk5 ~ utNum_diff, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+Regression: risk4 ~ utNum_diff
+
+```{r}
+# regression
+data_tib %>% 
+  aov(risk4 ~ utNum_diff, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+
+```
+
+Regression: risk3 ~ utNum_diff
+
+```{r}
+# regression
+data_tib %>% 
+  aov(risk3 ~ utNum_diff, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+
+```
+
+印出長度差最多的前十篇逐字稿
+
+```{r}
+# print the extreme cases
+data_tib %>% 
+  filter(utNum_caller_group != utNum_responser_group) %>%
+  select(dialogue_id, utNum_diff) %>%
+  arrange(desc(utNum_diff)) %>%
+  head(10) %>%
+  knitr::kable()
+```
+
+去掉長度差最多的逐字稿，再分析一次
+
+ANOVA: utNum_diff ~ risk5
+
+```{r}
+# anova
+data_tib %>% 
+  # 篩序差最多的逐字稿
+  filter(dialogue_id != "20151204205509") %>%
+  # 篩去差為0的逐字稿
+  filter(utNum_diff != 0) %>%
+  mutate(risk5 = risk5 %>% as.factor()) %>%
+  aov(utNum_diff ~ risk5, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+
+
+
+

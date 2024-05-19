@@ -1,0 +1,342 @@
+---
+title: "Visualization of Model Predicting Cumulative Utterances (Overall)"
+author: "Chunyen"
+date: "2024/3/13"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+editor_options: 
+  chunk_output_type: console
+header-includes:
+  - \usepackage{fontspec}
+  - \setmainfont{Noto Sans CJK TC}
+---
+
+# Introduction
+
+視覺化逐句累積輸入時模型預測的表現。
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r include=FALSE}
+# import libraries
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r}
+# set working directory
+setwd("/home/quantlab/2024_ChunyenThesis/Bert")
+```
+
+```{r include=FALSE}
+# Fix the Mandarin font issue
+library(showtext)
+
+# 添加字體
+# font_add("Noto Sans CJK TC", "/usr/share/fonts/opentype/noto/NotoSansCJK-Light.ttc")
+font_add("Noto Sans CJK TC", "/notebooks/exploratory/NotoSansCJK-Light.ttc")
+
+# 啟用 showtext_auto() 自動渲染文字
+showtext_auto()
+
+```
+
+
+```{r}
+# Function
+
+Read_predict_label <- function(risklevel, refSentence, allFilesName_vec, foldpath){
+  filteredFilesName <- allFilesName_vec[grep(risklevel, allFilesName_vec)]
+  filteredFilesName <- filteredFilesName[grep(refSentence, filteredFilesName)]
+  filteredFilesName <- filteredFilesName[grep("predict_label", filteredFilesName)]
+  # It should be only one file
+  input_tib <- read_csv(paste0(foldpath, "/", filteredFilesName))
+  return(input_tib)
+}
+Read_predict_metric <- function(risklevel, refSentence, allFilesName_vec, foldpath){
+  filteredFilesName <- allFilesName_vec[grep(risklevel, allFilesName_vec)]
+  filteredFilesName <- filteredFilesName[grep(refSentence, filteredFilesName)]
+  filteredFilesName <- filteredFilesName[grep("predict_metric", filteredFilesName)]
+  # It should be only one file
+  input_tib <- read_csv(paste0(foldpath, "/", filteredFilesName))
+  return(input_tib)
+}
+
+# function to plot metric data (Accuracy, Recall, Precision, F1 Score)
+Plot_metric <- function(metric_tib, title, risklevel){
+  level_num <- sub("risk", "", risklevel) %>% as.integer()
+  title <- sprintf("%s (%s Risk Level)", title, level_num)
+  ggplot(metric_tib, aes(x = cum_ut_i)) + 
+    geom_line(aes(y = accuracy, colour = "Accuracy", linetype = "Accuracy")) +
+    geom_line(aes(y = recall, colour = "Recall", linetype = "Recall")) +
+    geom_line(aes(y = precision, colour = "Precision", linetype = "Precision")) +
+    geom_line(aes(y = f1, colour = "F1 Score", linetype = "F1 Score")) +
+    geom_hline(yintercept = (1 / level_num), linetype = "dashed", color = "black") +
+    labs(x = "Cumulative Utterance Number", y = "Metrics Score", title = title) +
+    theme_minimal() +
+    theme(legend.title = element_blank()) +
+    scale_y_continuous(limits = c(0, 0.7), breaks = seq(0, 0.6, 0.2)) +
+    scale_x_continuous(limits = c(0, NA), breaks = seq(0, 1000, 200)) +
+    scale_colour_manual(
+      name = "Metrics",   # 合併後的圖例名稱
+      values = c(
+        "Accuracy" = "#377eb8",
+        "Recall" = "#4daf4a",
+        "Precision" = "#e41a1c",
+        "F1 Score" = "#984ea3"
+      )
+    ) +
+    scale_linetype_manual(
+      name = "Metrics",   # 合併後的圖例名稱
+      values = c(
+        "Accuracy" = "solid",
+        "Recall" = "twodash",
+        "Precision" = "dotted",
+        "F1 Score" = "dotdash"
+      )
+    )
+}
+
+# function to plot metric data (graded precision, graded recall, FScore)
+Plot_graded_metric <- function(metric_tib, title, risklevel){
+  level_num <- sub("risk", "", risklevel) %>% as.integer()
+  title <- sprintf("%s (%s Risk Level)", title, level_num)
+  ggplot(metric_tib, aes(x = cum_ut_i)) + 
+    geom_line(aes(y = grade_precision, colour = "Graded Precision", linetype = "Graded Precision")) +
+    geom_line(aes(y = grade_recall, colour = "Graded Recall", linetype = "Graded Recall")) +
+    geom_line(aes(y = FScore, colour = "F1 Score", linetype = "F1 Score")) +
+    # geom_hline(yintercept = (1 / level_num), linetype = "dashed", color = "black") +
+    labs(x = "Cumulative Utterance Number", y = "Metrics Score", title = title) +
+    theme_minimal() +
+    theme(legend.title = element_blank()) +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+    scale_x_continuous(limits = c(0, NA), breaks = seq(0, 1000, 200)) +
+    scale_colour_manual(
+      name = "Metrics",   # 合併後的圖例名稱
+      values = c(
+        "Graded Precision" = "#377eb8",
+        "Graded Recall" = "#4daf4a",
+        "F1 Score" = "#e41a1c"
+      )
+    ) +
+    scale_linetype_manual(
+      name = "Metrics",   # 合併後的圖例名稱
+      values = c(
+        "Graded Precision" = "solid",
+        "Graded Recall" = "twodash",
+        "F1 Score" = "dotdash"
+      )
+    )
+}
+```
+
+
+
+```{r}
+# Set folder path
+processed_path <- "data/processed/"
+rfReports_path <- "results/rf_cum_utterance"
+bertReports_path <- "results/bert_cum_utterance"
+
+rf_allFilesName_vec <- list.files(rfReports_path, pattern = "\\.csv$", full.names = TRUE) %>% basename()
+bert_allFilesName_vec <- list.files(bertReports_path, pattern = "\\.csv$", full.names = TRUE) %>% basename()
+
+```
+
+```{r include=FALSE}
+# read transcript and risklevel data
+risklevel_tib <- read_csv(paste0(processed_path, "risklevel.csv"))
+transcript_caller_tib <- read_csv(paste0(processed_path, "transcripts_emb_caller.csv"))
+transcript_responser_tib <- read_csv(paste0(processed_path, "transcripts_emb_responser.csv"))
+
+# Count utterances by each dialogue_id
+utNum_caller_tib <- transcript_caller_tib %>% 
+  group_by(dialogue_id) %>%
+  summarise(utNum_caller = n())
+utNum_responser_tib <- transcript_responser_tib %>% 
+  group_by(dialogue_id) %>%
+  summarise(utNum_responser = n())
+
+# join by dialogue_id
+utNum_tib <- utNum_caller_tib %>% 
+  left_join(., utNum_responser_tib, by = "dialogue_id")
+data_tib <- risklevel_tib %>% 
+  left_join(., utNum_tib, by = "dialogue_id")
+
+# Group transcripts by utterance number of caller
+cut_off1 <- 150
+cut_off2 <- 300
+data_tib <- data_tib %>% 
+  mutate(utNum_caller_group = case_when(
+    utNum_caller <= cut_off1 ~ "short",
+    utNum_caller > cut_off1 & utNum_caller <= cut_off2 ~ "medium",
+    utNum_caller > cut_off2 ~ "long"
+  ))
+# Group transcripts by utterance number of responser
+cut_off1 <- 175
+cut_off2 <- 350
+data_tib <- data_tib %>% 
+  mutate(utNum_responser_group = case_when(
+    utNum_responser <= cut_off1 ~ "short",
+    utNum_responser > cut_off1 & utNum_responser <= cut_off2 ~ "medium",
+    utNum_responser > cut_off2 ~ "long"
+  ))
+```
+
+```{r}
+data_tib %>% str()
+```
+
+# Risk5 X RF Model
+
+```{r include=FALSE}
+risklevel <- "risk5"
+refSentence <- "max_sim_ref3"
+# read cumulative utterance prediction data
+rf_metric_tib <- Read_predict_metric(risklevel, refSentence, rf_allFilesName_vec, rfReports_path)
+```
+
+```{r}
+# Fix the FScore column
+rf_metric_tib <- rf_metric_tib %>% 
+  mutate(FScore = 2*grade_precision*grade_recall / (grade_precision + grade_recall))
+```
+
+```{r}
+# plot the metric data
+rf_metric_tib %>% 
+  Plot_metric(., "RF Model Metrics Over Cumulative Utterances", risklevel)
+
+rf_metric_tib %>% 
+  Plot_graded_metric(., "RF Model Graded Metrics Over Cumulative Utterances", risklevel)
+```
+
+# Risk5 X BERT Model
+
+```{r include=FALSE}
+# read cumulative utterance prediction data
+risklevel <- "risk5"
+refSentence <- "max_sim_ref2"
+bert_metric_tib <- Read_predict_metric(risklevel, refSentence, bert_allFilesName_vec, bertReports_path)
+```
+
+```{r}
+# Fix the FScore column
+bert_metric_tib <- bert_metric_tib %>% 
+  mutate(FScore = 2*grade_precision*grade_recall / (grade_precision + grade_recall))
+```
+
+
+```{r}
+# plot the metric data
+bert_metric_tib %>% 
+  Plot_metric(., "BERT Model Metrics Over Cumulative Utterances", risklevel)
+
+bert_metric_tib %>%
+  Plot_graded_metric(., "BERT Model Graded Metrics Over Cumulative Utterances", risklevel)
+```
+
+# Risk4 X RF Model
+
+```{r include=FALSE}
+risklevel <- "risk4"
+refSentence <- "avg_sim_ref3"
+# read cumulative utterance prediction data
+rf_metric_tib <- Read_predict_metric(risklevel, refSentence, rf_allFilesName_vec, rfReports_path)
+```
+
+```{r}
+# Fix the FScore column
+rf_metric_tib <- rf_metric_tib %>% 
+  mutate(FScore = 2*grade_precision*grade_recall / (grade_precision + grade_recall))
+```
+
+```{r}
+# plot the metric data
+rf_metric_tib %>% 
+  Plot_metric(., "RF Model Metrics Over Cumulative Utterances", risklevel)
+
+rf_metric_tib %>%
+  Plot_graded_metric(., "RF Model Graded Metrics Over Cumulative Utterances", risklevel)
+
+```
+
+# Risk4 X BERT Model
+
+```{r include=FALSE}
+risklevel <- "risk4"
+refSentence <- "avg_sim_ref2"
+# read cumulative utterance prediction data
+bert_metric_tib <- Read_predict_metric(risklevel, refSentence, bert_allFilesName_vec, bertReports_path)
+```
+
+```{r}
+# Fix the FScore column
+bert_metric_tib <- bert_metric_tib %>% 
+  mutate(FScore = 2*grade_precision*grade_recall / (grade_precision + grade_recall))
+```
+
+```{r}
+# plot the metric data
+bert_metric_tib %>% 
+  Plot_metric(., "BERT Model Metrics Over Cumulative Utterances", risklevel)
+
+bert_metric_tib %>%
+  Plot_graded_metric(., "BERT Model Graded Metrics Over Cumulative Utterances", risklevel)
+
+```
+
+# Risk3 X RF Model
+
+```{r include=FALSE}
+risklevel <- "risk3"
+refSentence <- "max_sim_ref3"
+# read cumulative utterance prediction data
+rf_metric_tib <- Read_predict_metric(risklevel, refSentence, rf_allFilesName_vec, rfReports_path)
+```
+
+```{r}
+# Fix the FScore column
+rf_metric_tib <- rf_metric_tib %>% 
+  mutate(FScore = 2*grade_precision*grade_recall / (grade_precision + grade_recall))
+```
+
+```{r}
+# plot the metric data
+rf_metric_tib %>% 
+  Plot_metric(., "RF Model Metrics Over Cumulative Utterances", risklevel)
+
+rf_metric_tib %>%
+  Plot_graded_metric(., "RF Model Graded Metrics Over Cumulative Utterances", risklevel)
+
+```
+
+# Risk3 X BERT Model
+
+```{r include=FALSE}
+risklevel <- "risk3"
+refSentence <- "max_sim_ref1"
+# read cumulative utterance prediction data
+bert_metric_tib <- Read_predict_metric(risklevel, refSentence, bert_allFilesName_vec, bertReports_path)
+```
+
+```{r}
+# Fix the FScore column
+bert_metric_tib <- bert_metric_tib %>% 
+  mutate(FScore = 2*grade_precision*grade_recall / (grade_precision + grade_recall))
+```
+
+```{r}
+# plot the metric data
+bert_metric_tib %>% 
+  Plot_metric(., "BERT Model Metrics Over Cumulative Utterances", risklevel)
+
+bert_metric_tib %>%
+  Plot_graded_metric(., "BERT Model Graded Metrics Over Cumulative Utterances", risklevel)
+
+```
